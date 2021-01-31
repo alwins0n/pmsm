@@ -10,13 +10,13 @@ class QueueTest extends AnyFunSuite {
 
     val store = Store(Nil)
 
-    store.installListener[TestMessage.MessageA.type] { (_, _) =>
-      store.dispatch(TestMessage.MessageB)
-      value = 2
-    }
-    store.installListener[TestMessage.MessageB.type] { (_, _) =>
-      if (value == 1) throw new IllegalStateException("message b was not queued")
-      value = 3
+    store.listen {
+      case TestMessage.MessageA =>
+        store.dispatch(TestMessage.MessageB)
+        value = 2
+      case TestMessage.MessageB =>
+        if (value == 1) throw new IllegalStateException("message b was not queued")
+        value = 3
     }
 
     store.dispatch(TestMessage.MessageA)

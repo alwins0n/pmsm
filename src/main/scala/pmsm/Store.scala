@@ -31,7 +31,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
 
     def apply(state: S): Unit = use(select(state))
   }
-  type Listener = (S, M) => Unit
+  type Listener = M => Unit
   type Reducer = (S, M) => S
 
   private var processing: Boolean = false
@@ -75,18 +75,18 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     *
     * usage:
     * {{{
-    *   store.listen(s => {
+    *   store.listen {
     *     case HandledMessage(...) => // perform side effect
     *     ...
     *   })
     * }}}
     *
-    * a default case is not necessary, unspecified messages do not modify the state
+    * a default case is not necessary, unspecified messages are simply not handled
     *
-    * @param listen a "partial" version of S => M => S
+    * @param listen partial function of M => Unit
     */
-  def listen(listen: S => PartialFunction[M, Unit]): Unit = {
-    val lst: Listener = (s, m) => listen(s).applyOrElse(m, (_: M) => ())
+  def listen(listen: PartialFunction[M, Unit]): Unit = {
+    val lst: Listener = m => listen.applyOrElse(m, (_: M) => ())
     this.listeners = lst :: this.listeners
   }
 
@@ -95,41 +95,24 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     *
     * usage:
     * {{{
-    *   store.listenTo[HandledMessage](s => {
+    *   store.listenTo[HandledMessage] {
     *     case SubTypeOfHandledMessage(...) => // perform side effect
     *     ...
-    *   })
+    *   }
     * }}}
     *
     * note as opposed to [[Store.listen]] the case handling is checked for exhaustiveness
     *
-    * @param listener listening function (S, M) => Unit in the curried form of S => M1 => Unit
+    * @param listener side effecting function M1 => Unit
     * @tparam M1 the listened to message type
     */
-  def listenTo[M1 <: M: ClassTag](listener: S => M1 => Unit): Unit = {
-    val lst: Listener = (s, m) =>
-      m match {
-        case a: M1 => listener(s)(a)
-        case _     => ()
-      }
+  def listenTo[M1 <: M: ClassTag](listener: M1 => Unit): Unit = {
+    val lst: Listener = {
+      case a: M1 => listener(a)
+      case _ => ()
+    }
     this.listeners = lst :: this.listeners
   }
-
-  /**
-    * adds a listener in the simplest form (s, m) => Unit
-    *
-    * eg:
-    * {{{
-    *   store.installListener[HandledMessage] { (s, m) =>
-    *      ... // side effect with m, guaranteed to be of type M1
-    *   }
-    * }}}
-    *
-    * @param listener the typed listening function
-    * @tparam M1 the listened to message type
-    */
-  def installListener[M1 <: M: ClassTag](listener: (S, M1) => Unit): Unit =
-    listenTo(listener.curried)
 
   /**
     * reduces the state by specifying handled messages.
@@ -224,7 +207,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
 
     pushChanges()
     for (listener <- listeners.reverse)
-      listener.apply(currentState, message)
+      listener.apply(message)
 
     if (messageQueue.nonEmpty)
       process(messageQueue.dequeue())

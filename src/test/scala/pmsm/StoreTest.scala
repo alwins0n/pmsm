@@ -18,15 +18,17 @@ class StoreTest extends AnyFunSuite {
       case TestMessage.MessageB => s.copy(componentState = s.componentState.setTo(7))
     })
 
-    store.installListener[TestMessage.MessageB.type]((s, _) => {
-      if (s.componentState.value == 7)
-        store.dispatch(GlobalMessage)
-    })
+    store.listenTo[TestMessage] {
+      case TestMessage.MessageA => ()
+      case TestMessage.MessageB =>
+        if (store.state.componentState.value == 7)
+          store.dispatch(GlobalMessage)
+    }
 
     store.select(_.componentState)(s => componentInput prepend s.value)
     store.installReducer[GlobalMessage.type] { (s, _) => s.copy(global = "changedOLD") }
     store.installReducer[GlobalMessage.type] { (s, _) => s.copy(global = "changed") }
-    store.installListener[GlobalMessage.type] { (s, _) => globalSideEffect prepend s.global }
+    store.listenTo[GlobalMessage.type] { _ => globalSideEffect prepend store.state.global }
 
     assert(componentInput.isEmpty)
 

@@ -32,7 +32,7 @@ val store = new Store[MyState, MyMessage](MyState())
 or preferably
 
 ```scala
-val store = Store.accepting[MyMessage](MyState())
+val store = Store.accepting[MyMessage].init(MyState())
 ```
 
 If the type of the messages is not important or even should be ignored 
@@ -41,7 +41,7 @@ independent from one another, not sharing a supertype)
 a "generic" Store can be constructed via just an initial state.
 
 ```scala
-val store = Store(MyState()) // = Store[MyState, Any]
+val store = Store(MyState()) // : Store[MyState, Any]
 ```
 
 While the state can be any class, it is recommended to be a case class with sensible defaults.
@@ -153,9 +153,12 @@ is fed into the next `Reducer` resulting in a `foldLeft` semantic.
 
 ## Output
 
-Downstream of the store can take two forms:
+The current state which is the last sucessfully reduced state is
+available via `store.state`.
+
+Furthermore the downstream of the store can take two forms:
 `Subscription` (targeted state downstream) or 
-`Listener` (targeted message downstream)
+`Listener` (targeted message downstream).
 
 ### Subscription
 
@@ -207,29 +210,31 @@ The `Listener` is a side-effecting function which gives the store
 the capability to react to messages.
 
 ```scala
-type Listener = (S, M) => Unit
+type Listener = M => Unit
 ```
- 
-The `S` parameter is the reduced state
 
-To install listeners, `Store` offers `installListener`, `listen` and `listenTo`
-behaving similar to `installReducer`, `reduce` and `reduceMessage`.
+To install listeners, `Store` offers `listen` and `listenTo`
+behaving similar to `reduce` and `reduceMessage`.
 
 e.g.
 
 ```scala
-store.installListener[NameChange] { (state, message) =>
-  console.log(s"name ${message.name} has been entered and processed to be ${state.sanitizedName}")
+store.listenTo[NameChange] { message =>
+  console.log(s"name ${message.name} has been entered and processed to be ${store.state.sanitizedName}")
 }
 ```
+
+Note that the reduced state after receiving the message `NameChange` 
+is accessed via `store.state`.
+
  `listen` again is accepting a parameter of type
-`S => PartialFunction[M, S]` allowing to handle cases of `M`
+`PartialFunction[M, Unit]` allowing to handle cases of `M`
 within one syntactical closure, whereas `listenTo` allows for exhaustiveness checks
 
 Dispatching a message from within a listener is possible and encouraged 
 (e.g. for messages resulting in ajax calls). If the current "digest" is not finished
 (not all listeners are processed) the dispatched message is queued to ensure a 
-clean ordering of messages
+clean ordering of messages.
 
 # Cookbook
 
