@@ -1,8 +1,8 @@
 # PMSM - Poor Man's State Management
 
----
-
 A super lightweight library for "redux-like" development in scala.js
+
+---
 
 # Motivation
 While there are existing state management solutions for scala.js (Diode, redux)
