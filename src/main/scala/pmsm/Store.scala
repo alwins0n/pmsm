@@ -33,6 +33,8 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   }
   type Listener = M => Unit
   type Reducer = (S, M) => S
+  type ErrorListener = (Throwable, M) => Unit
+  type ErrorHandler = (Throwable, S, M) => S
 
   private var processing: Boolean = false
   private val messageQueue: mutable.Queue[M] = mutable.Queue.empty
@@ -54,6 +56,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   private var reducers: List[Reducer] = Nil
   private var subscriptions: List[Subscription] = Nil
   private var listeners: List[Listener] = Nil
+  private var errorHandler: List[ErrorHandler] = Nil
 
   /**
     * subscribe to changes by selecting a slice of the state
@@ -109,7 +112,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   def listenTo[M1 <: M: ClassTag](listener: M1 => Unit): Unit = {
     val lst: Listener = {
       case a: M1 => listener(a)
-      case _ => ()
+      case _     => ()
     }
     this.listeners = lst :: this.listeners
   }
@@ -193,6 +196,8 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
       processing = true
       try {
         process(message)
+      } catch {
+        case e: Throwable => handleError(e, message)
       } finally {
         processing = false
       }
@@ -227,10 +232,42 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     }
   }
 
+  private def handleError(error: Throwable, causingMessage: M): Unit = {
+    if (errorHandler.isEmpty)
+      throw error
+    else {
+      val stateAfterError = errorHandler.foldRight(state) { (handler, s) =>
+        handler(error, s, causingMessage)
+      }
+      states = stateAfterError :: states
+      pushChanges()
+    }
+  }
+
   /**
     * invokes all subscriptions with the current state
     */
   def push(): Unit = subscriptions.foreach { _.apply(currentState) }
+
+  /**
+    * installs a side effecting error listener that is invoked when
+    * an error in the message processing occurs.
+    *
+    * @param listener
+    */
+  def installErrorListener(listener: ErrorListener): Unit = {
+    val asHandler: ErrorHandler = (e, s, m) => {
+      listener(e, m)
+      s
+    }
+    this.errorHandler = asHandler :: errorHandler
+  }
+
+  /**
+    * @param handler
+    */
+  def installErrorHandler(handler: ErrorHandler): Unit =
+    this.errorHandler = handler :: errorHandler
 }
 
 object Store {
@@ -251,9 +288,9 @@ object Store {
     * @tparam M the message type to be handled
     * @return builder for a {{Store}} capable of handling messages of type M
     */
-  def accepting[M : ClassTag]: StoreBuilder[M] = new StoreBuilder[M]
+  def accepting[M: ClassTag]: StoreBuilder[M] = new StoreBuilder[M]
 
-  class StoreBuilder[M : ClassTag] {
+  class StoreBuilder[M: ClassTag] {
     def init[S](s: S): Store[S, M] = this(s)
     def apply[S](s: S): Store[S, M] = new Store(s)
     def reducing[S](s: S)(reducer: (S, M) => S): Store[S, M] = {
