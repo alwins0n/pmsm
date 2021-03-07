@@ -18,7 +18,7 @@ class TypedStoreTest extends AnyFunSuite {
       case TestMessage.MessageA => s.copy(componentState = s.componentState.increment())
       case TestMessage.MessageB => s.copy(componentState = s.componentState.setTo(7))
     })
-    store.select(_.componentState)(s => componentInput prepend s.value)
+    store.select(_.componentState).subscribe(s => componentInput prepend s.value)
 
     assert(componentInput.isEmpty)
     store.dispatch(TestMessage.MessageA)

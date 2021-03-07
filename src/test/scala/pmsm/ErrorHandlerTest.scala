@@ -17,7 +17,7 @@ class ErrorHandlerTest extends AnyFunSuite {
     val messageComponent: List[String] => Unit = msgs =>
       messageDisplay = msgs.mkString(", ")
 
-    store.select(identity)(messageComponent)
+    store.select(identity).subscribe(messageComponent)
     store.reduce(_ => throw new IllegalArgumentException)
     store.listen {
       case TestMessage.MessageA =>

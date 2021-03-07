@@ -14,35 +14,36 @@ my requirements for a project were too simple to throw a complex framework at it
 - leverage FP but be pragmatic (don't obsess with purity, effect tracking, ...)
 - minimal/clean API (make common things easy and specialized things possible)
 
-# Usage
+# Basic Usage
 
 *TODO artifact coordinates*
 
 ---
 
 Get started by instantiating a `Store[S, M]`.
-Store is a (stateful)
-central processing unit typed to hold a state `S` 
+Store is a (stateful) central processing unit typed to hold a state `S` 
 and accept messages of type `M`.
+
+```scala
+val store = Store(MyState()) // : Store[MyState, Any]
+```
+
+creates a new "generic" store. It is capable of handling any type of message.
+It can be useful to narrow acceptable messsage down to a type.
+
+Use
 
 ```scala
 val store = new Store[MyState, MyMessage](MyState())
 ```
 
-or preferably
+or
 
 ```scala
 val store = Store.accepting[MyMessage].init(MyState())
 ```
 
-If the type of the messages is not important or even should be ignored 
-(since the messages may eventually stem from components 
-independent from one another, not sharing a supertype) 
-a "generic" Store can be constructed via just an initial state.
-
-```scala
-val store = Store(MyState()) // : Store[MyState, Any]
-```
+to create a `Store[MyState, MyMessage]`.
 
 While the state can be any class, it is recommended to be a case class with sensible defaults.
 e.g.
@@ -68,85 +69,59 @@ store.dispatch(SomeMessage("param"))
 store(SomeMessage("param"))
 ```
 
-The following examples assumes some software component
-which is capable of issuing a `Message` having two concrete types
-(message is a "sum-type"):
-```scala
-// i.e. Message = NameChange | NameConfirmation
-sealed trait ComponentMessage
-object ComponentMessage {
-  final case class NameChange(newName: String) extends ComponentMessage
-  case object NameConfirmation extends ComponentMessage
-}
-```
-
 ## Behaviour
 
 Behaviour is installed in the store by adding reducers.
-Have a look at the internal definition of a store's reducer
+Have a look at the internal definition of a store's reducer:
 
 ```scala
 type Reducer = (S, M) => S 
 ```
 
-to install a reducer for a particular message type use `installReducer`
+Add behaviour to the store by defining a new reducer:
 
 ```scala
-store.installReducer[NameChange] { (state, message) => // message is guaranteed to be of type "NameChanged"
-    state.copy(nameState = message.newName)
-    ...
-})
+store.addReducer { (s, m) => 
+  ... // use m and return updated s
+}
 ```
 
-While this is a nice way to add behaviour for a simple message,
-`Store` offers APIs to handle add complex behaviour in an easy way.
+The `Reducer` will match on the message to decide on how to update the state 
+as well as provide a default (the untouched state) for all unhandled cases.
 
-The `Reducer` is the curried form of a 
-pure function which takes a state and a message
-and returns the resulting or "next" state.
+Since this is a common pattern it is syntactially improved by using a curried reducer.
 
 ```scala
 type ReducerCurried = S => M => S 
 ```
 
-Enter the methods `reduce` and `reduceMessage`
+This is the curried form of a
+pure function which takes a state and a message
+and returns the resulting or "next" state.
 
-`reduce` is flexible and convenient syntactically. 
-A `Reducer` in its curried form can be installed as
+It can be installed as
 `S => PartialFunction[M, S]` which gives us the possibility
-to non-exhaustively list all messages that should be handled. 
-
-So an example could be:
+to non-exhaustively list all messages that should be handled.
 
 ```scala
 store.reduce(state => {
-   case NameChange(newName) => state.copy(nameState = ...)
-   case OtherMessage => ???
-   ...
-   // NameConfirmed does not need to be handled and leaves the state unchanged
+   case ChangeName(newName) => state.copy(nameState = ...)
+   case OtherMessage => ...
+   // no default case necessary since there is no exhaustiveness check
 })
 ```
 
-and can be read as: "given a state `state` use it to reduce all listed messages"
+It can be read as: "given a `state` use it to handle all listed messages"
 
-Whereas by using `reduceMessage` you may exactly specify what
-type of message handling is added to the store and
-benefit from type safety (e.g. exhaustiveness matching)
-
-An example of handling all messages issued by the component:
-
-```scala
-store.reduceMessage[ComponentMessage](state => {
-    case NameChange(newName) => state.copy(nameState = ...)
-    // warning/error since NameConfirmed is not handled
-})
-```
+### Behaviour Details
 
 After a message is received by the store all `Reducers` 
-are invoked in the order of registration in one 
-reduction step "transactionally" (TODO explain). 
-That implies that later registered state transitions of some message M
-are possibily overriding previously installed behaviour.
+are invoked in the order of registration. That implies that later 
+registered state transitions of some message M
+can react to previously installed behaviour (state changes). 
+The reduction step is performed "transactionally" 
+i.e. if an error occurs the state is left
+unchanged (or rolled back if you will). 
 
 The state after each invocation 
 is fed into the next `Reducer` resulting in a `foldLeft` semantic.
@@ -162,47 +137,17 @@ Furthermore the downstream of the store can take two forms:
 
 ### Subscription
 
-Via subscriptions (sliced) state changes can be consumed.
-
-A subscription is composed of essentially two functions
-`S => A` (selection) and `A => Unit` (side effecting usage) 
-as one (`S => Unit`).
-`A` is a slice of the state or "`Selection`". 
-Internally a trait is used
+If the state changes due to reduction 
+the changed state can be consumed by subscribers. 
+They take the form `S => Unit` and can be created as follows:
 
 ```scala
-trait Subscription extends (S => Unit) {
-  type Selection
-  ...
+store.subscribe { state => 
+  ... // use changed state
 }
 ```
 
-If a message is received by the store, after the state is reduced 
-the following mechanics are invoked:
-
-- compute the slice of each subscription
-- compare each slice with the slice of the previous state
-- if changed, invoke the subscription (usage) with the slice as parameter
-
-The API of create a subscription (`select(..)`) is thus:
-
-```scala
-// assume a state with field "componentState"
-store.select(_.componentState) { cs => 
-  ... // use changed componentState cs
-}
-```
-
-Which creates a subscription of `MyState.componentState` 
-and pushes changes to the handler function of type `A => Unit` (`cs => ...`)
-effectively creating a conditional side effecting function invocation `S => Unit`
-
-If your downstream consumers are functions or side effecting methods,
-subscriptions become
-
-```scala
-store.select(_.componentState)(myComponent.update)
-```
+Change detection works via deep equals on the state, as mentioned before.
 
 ### Listeners
 
@@ -213,28 +158,154 @@ the capability to react to messages.
 type Listener = M => Unit
 ```
 
-To install listeners, `Store` offers `listen` and `listenTo`
-behaving similar to `reduce` and `reduceMessage`.
-
-e.g.
+Similar to `addReducer` installing a listener is done by calling:
 
 ```scala
-store.listenTo[NameChange] { message =>
+store.addListener { m => 
+  ... // use m
+}
+```
+
+And similar to `reduce` the `listen` API handles messages non-exhaustive.
+
+```scala
+store.listen { 
+  case Handled(param) => ...
+}
+```
+
+Dispatching a message from within a listener is possible and encouraged 
+(e.g. for messages resulting in ajax calls). 
+
+*Note that if the current "digest" is not finished
+(not all listeners are processed) the dispatched message 
+is queued to ensure a clean ordering of messages.*
+
+# Advanced Usage
+
+The previous sections introduced concepts and APIs which are useful only
+in the simplest of use cases.
+
+If state and messages grow in complexity adding behaviour becomes cumbersome, 
+amount of messages that are not handled properly increases 
+and state change detection is always global.
+
+There are APIs to zoom in on state and message types to make the store
+behave more robust and sensible while keeping the boilerplate to a minimum
+
+## Message Selection
+
+Assume there is a component capable of issuing a `Message` 
+having two concrete types (message is a "sum-type"):
+
+```scala
+// i.e. Message = ChangeName | ConfirmName
+sealed trait ComponentMessage
+object ComponentMessage {
+  final case class ChangeName(newName: String) extends ComponentMessage
+  case object ConfirmName extends ComponentMessage
+}
+
+```
+
+to install a reducer for a particular message type use `installReducer`
+
+```scala
+store.installReducer[ChangeName] { (state, message) => // message is guaranteed to be of type "ChangeNamed"
+    state.copy(nameState = message.newName)
+    ...
+})
+```
+
+
+To use the curried function syntax introduced earlier, but
+benefit from type safety (i.e. exhaustiveness matching) use `reduceMessage`.
+
+```scala
+store.reduceMessage[ComponentMessage](state => {
+    case ChangeName(newName) => state.copy(nameState = ...)
+    // warning/error since ConfirmName is not handled
+})
+```
+
+---
+
+Listeners can also installed pre-selecting messages to be handled with `listenTo`.
+
+```scala
+store.listenTo[ChangeName] { message => // mesage is guaranteed ot be of type ChangeName
   console.log(s"name ${message.name} has been entered and processed to be ${store.state.sanitizedName}")
 }
 ```
 
-Note that the reduced state after receiving the message `NameChange` 
-is accessed via `store.state`.
+Note that the reduced state after receiving the message `ChangeName`
+is accessed via `store.state` in the listener.
 
- `listen` again is accepting a parameter of type
-`PartialFunction[M, Unit]` allowing to handle cases of `M`
-within one syntactical closure, whereas `listenTo` allows for exhaustiveness checks
+## State Optics
 
-Dispatching a message from within a listener is possible and encouraged 
-(e.g. for messages resulting in ajax calls). If the current "digest" is not finished
-(not all listeners are processed) the dispatched message is queued to ensure a 
-clean ordering of messages.
+Subscriptions without specific change detection have limits in their usefulnes.
+In general we are only interested in certain changes of the state.
+
+This is why a subscription is actually function `S => Unit` composed of two functions
+- `S => A` (selection)
+- `A => Unit` (consumption)
+
+Assume we have a state `case class State(componentState = ComponentState(), ...)`
+and we want to focus on the component substate.
+
+To create a subscription we first `select` a slice of the state
+and `subscribe` to changes:
+
+```scala
+store.select(_.componentState).subscribe { cs => 
+  ... // use changed componentState cs
+}
+```
+
+If your downstream consumers are functions or side effecting methods,
+subscriptions become
+
+```scala
+store.select(_.componentState).subscribe(myComponent.update)
+```
+
+If a message is received by the store, after the state is reduced
+the following mechanics are invoked:
+
+- compute the slice of each subscription (selection)
+- compare each slice with the slice of the previous state
+- if changed, invoke the downstream function (consumption) with the slice as parameter
+
+`select` thus slices the state for readonly functionality with a "getter" function
+To "upgrade" the slice for adding behaviour use `modifying` which takes a "setter" function
+
+```scala
+val sliced = store
+  .select(_.componentState)
+  .modifying((s, cs) => s.copy(componentState = cs))
+// results in something like `Store[ComponentState, M]
+```
+
+"Getter" and "setter" can also be combined with the `lens` method
+
+```scala
+val lensed = store.lens(_.componentState)((s, a) => s.copy(componentState = a))
+// equivalent to "sliced"
+```
+
+This state is now able to add reducers and subscribe to changes based on the slice of the state
+
+```scala
+lensed.reduce(compState => {
+  case SomeMessage => compState.doFoo() // returns a ComponentState
+    ...
+})
+```
+
+```scala
+lensed.subscribe(myComponent.update)
+```
+
 
 # Cookbook
 

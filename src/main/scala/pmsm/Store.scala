@@ -16,21 +16,19 @@ import scala.reflect.ClassTag
   * @tparam M type of the messages that should be manageable
   */
 class Store[S, M](init: S, historySize: Int = minimumHistorySize)
-    extends Dispatch[M] {
+    extends Dispatch[M]
+    with Reducing[S, M]
+    with Consuming[S] {
 
   require(
     historySize >= minimumHistorySize,
     s"history size must be at least $minimumHistorySize"
   )
 
-  type Selector[A] = S => A
-  private[Store] trait Subscription extends (S => Unit) {
-    type Selection
-    def select(state: S): Selection
-    def use(s: Selection): Unit
+  type StateSelector[A] = Selector[S, A]
+  type StateModifier[A] = Modifier[S, A]
+  type StateSubscription = Subscription[S]
 
-    def apply(state: S): Unit = use(select(state))
-  }
   type Listener = M => Unit
   type Reducer = (S, M) => S
   type ErrorListener = (Throwable, M) => Unit
@@ -54,7 +52,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   def history: List[S] = states.tail
 
   private var reducers: List[Reducer] = Nil
-  private var subscriptions: List[Subscription] = Nil
+  private var subscriptions: List[StateSubscription] = Nil
   private var listeners: List[Listener] = Nil
   private var errorHandler: List[ErrorHandler] = Nil
 
@@ -65,13 +63,19 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     * @param usage function to use a slice of the state
     * @tparam A type of the slice of the state
     */
-  def select[A](selector: Selector[A])(usage: Downstream[A]): Unit = {
-    subscriptions = new Subscription {
-      override type Selection = A
-      override def select(s: S): A = selector(s)
-      override def use(a: A): Unit = usage(a)
-    } :: subscriptions
-  }
+  def select[A](selector: StateSelector[A]): SelectedStore[S, M, A] =
+    new SelectedStore[S, M, A](selector, this)
+
+  def lens[A](
+      get: StateSelector[A]
+  )(mod: StateModifier[A]): LensedStore[S, M, A] =
+    new LensedStore(get, mod, this)
+
+  def addSubscription(subscription: StateSubscription): Unit =
+    this.subscriptions = subscription :: subscriptions
+
+  def subscribe(sub: Downstream[S]): Unit =
+    addSubscription(Subscription(identity, sub))
 
   /**
     * listens to a specified set of messages.
@@ -117,66 +121,8 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     this.listeners = lst :: this.listeners
   }
 
-  /**
-    * reduces the state by specifying handled messages.
-    *
-    * usage:
-    * {{{
-    *   store.reduce(s => {
-    *     case HandledMessage(...) => s.copy(...)
-    *      ...
-    *   })
-    * }}}
-    *
-    * a default case is not necessary, unspecified messages do not modify the state
-    *
-    * @param reducer a "partial" version of S => M => S
-    */
-  def reduce(reducer: S => PartialFunction[M, S]): Unit = {
-    val red: Reducer = (s, m) => reducer(s).lift(m).getOrElse(s)
-    this.reducers = red :: reducers
-  }
-
-  /**
-    * reduces the state by specifying the message handled.
-    *
-    * usage:
-    * {{{
-    *   store.reduceMessage[HandledMessage](s => {
-    *     case SubTypeOfHandledMessage(...) => s.copy(...)
-    *      ...
-    *   })
-    * }}}
-    *
-    * note as opposed to [[Store.reduce]] the case handling is checked for exhaustiveness
-    *
-    * @param reducer reducing function (S, M) => S in the curried form of S => M1 => S
-    * @tparam M1 the reduced message type
-    */
-  def reduceMessage[M1 <: M: ClassTag](reducer: S => M1 => S): Unit = {
-    val red: Reducer = (s, m) =>
-      m match {
-        case a: M1 => reducer(s)(a)
-        case _     => s
-      }
-    this.reducers = red :: reducers
-  }
-
-  /**
-    * adds a reducer in the simplest form (s, m) => s
-    *
-    * eg:
-    * {{{
-    *   store.installReducer[HandledMessage] { (s, m) =>
-    *      ... // deal with m, guaranteed to be of type M1
-    *   }
-    * }}}
-    *
-    * @param reducer the typed reducing function
-    * @tparam M1 the reduced message type
-    */
-  def installReducer[M1 <: M: ClassTag](reducer: (S, M1) => S): Unit =
-    reduceMessage(reducer.curried)
+  def addReducer(reducer: (S, M) => S): Unit =
+    this.reducers = reducer :: reducers
 
   /**
     * @see [[dispatch]]
@@ -247,7 +193,10 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   /**
     * invokes all subscriptions with the current state
     */
-  def push(): Unit = subscriptions.foreach { _.apply(currentState) }
+  def push(): Unit =
+    subscriptions.foreach { s =>
+      (s.select _).andThen(s.use).apply(currentState)
+    }
 
   /**
     * installs a side effecting error listener that is invoked when
@@ -302,4 +251,126 @@ object Store {
 
   type Dispatch[M] = M => Unit
   type Downstream[T] = T => Unit
+
+  type Selector[S, S1] = S => S1
+  type Modifier[S, S1] = (S, S1) => S
+
+  trait Subscription[S] {
+    type Selection
+    def select(state: S): Selection
+    def use(s: Selection): Unit
+  }
+  object Subscription {
+    def apply[S, S1](
+        selector: Selector[S, S1],
+        consumer: Downstream[S1]
+    ): Subscription[S] =
+      new Subscription[S] {
+        override type Selection = S1
+        override def select(state: S): S1 = selector(state)
+        override def use(selection: S1): Unit = consumer(selection)
+      }
+  }
+
+  trait Consuming[S] {
+    def state: S
+    def subscribe(sub: Downstream[S]): Unit
+  }
+
+  trait Reducing[S, M] {
+
+    /**
+      * reduces the state by specifying handled messages.
+      *
+      * usage:
+      * {{{
+      *   store.reduce(s => {
+      *     case HandledMessage(...) => s.copy(...)
+      *      ...
+      *   })
+      * }}}
+      *
+      * a default case is not necessary, unspecified messages do not modify the state
+      *
+      * @param reducer a "partial" version of S => M => S
+      */
+    def reduce(reducer: S => PartialFunction[M, S]): Unit =
+      addReducer((s, m) => reducer(s).lift(m).getOrElse(s))
+
+    /**
+      * reduces the state by specifying the message handled.
+      *
+      * usage:
+      * {{{
+      *   store.reduceMessage[HandledMessage](s => {
+      *     case SubTypeOfHandledMessage(...) => s.copy(...)
+      *      ...
+      *   })
+      * }}}
+      *
+      * note as opposed to [[Store.reduce]] the case handling is checked for exhaustiveness
+      *
+      * @param reducer reducing function (S, M) => S in the curried form of S => M1 => S
+      * @tparam M1 the reduced message type
+      */
+    def reduceMessage[M1 <: M: ClassTag](reducer: S => M1 => S): Unit =
+      addReducer((s, m) =>
+        m match {
+          case a: M1 => reducer(s)(a)
+          case _     => s
+        }
+      )
+
+    /**
+      * adds a typed reducer in the simplest form (s, m) => s
+      *
+      * eg:
+      * {{{
+      *   store.installReducer[HandledMessage] { (s, m) =>
+      *      ... // deal with m, guaranteed to be of type M1
+      *   }
+      * }}}
+      *
+      * @param reducer the typed reducing function
+      * @tparam M1 the reduced message type
+      */
+    def installReducer[M1 <: M: ClassTag](reducer: (S, M1) => S): Unit =
+      reduceMessage(reducer.curried)
+
+    /**
+      * adds a reducer in the simplest form (s, m) => s
+      *
+      * eg:
+      * {{{
+      *   store.installReducer[HandledMessage] { (s, m) =>
+      *      ...
+      *   }
+      * }}}
+      *
+      * @param reducer the typed reducing function
+      */
+    def addReducer(reducer: (S, M) => S): Unit
+  }
+
+  class SelectedStore[S, M, S1](
+      selector: Selector[S, S1],
+      delegate: Store[S, M]
+  ) extends Consuming[S1] {
+    override def state: S1 =
+      selector(delegate.state)
+    override def subscribe(sub: Downstream[S1]): Unit =
+      delegate.addSubscription(Subscription(selector, sub))
+    def modifying(mod: Modifier[S, S1]): LensedStore[S, M, S1] =
+      new LensedStore(selector, mod, delegate)
+  }
+
+  class LensedStore[S, M, S1](
+      selector: Selector[S, S1],
+      modifier: Modifier[S, S1],
+      delegate: Store[S, M]
+  ) extends SelectedStore[S, M, S1](selector, delegate)
+      with Reducing[S1, M] {
+    override def addReducer(reducer: (S1, M) => S1): Unit =
+      delegate.addReducer((s, m) => modifier(s, reducer(selector(s), m)))
+  }
 }
