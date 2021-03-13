@@ -41,10 +41,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   private def currentState: S = states.head
   private def previousState: Option[S] = states.tail.headOption
 
-  /**
-    * @return the current state
-    */
-  def state: S = currentState
+  override def state: S = currentState
 
   /**
     * @return all previous states up to historySize - 1 (excluding the current state)
@@ -60,7 +57,6 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     * subscribe to changes by selecting a slice of the state
     *
     * @param selector function to select a slice of the state
-    * @param usage function to use a slice of the state
     * @tparam A type of the slice of the state
     */
   def select[A](selector: StateSelector[A]): SelectedStore[S, M, A] =
@@ -74,7 +70,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   def addSubscription(subscription: StateSubscription): Unit =
     this.subscriptions = subscription :: subscriptions
 
-  def subscribe(sub: Downstream[S]): Unit =
+  override def subscribe(sub: Downstream[S]): Unit =
     addSubscription(Subscription(identity, sub))
 
   /**
@@ -121,7 +117,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     this.listeners = lst :: this.listeners
   }
 
-  def addReducer(reducer: (S, M) => S): Unit =
+  override def addReducer(reducer: (S, M) => S): Unit =
     this.reducers = reducer :: reducers
 
   /**
@@ -273,7 +269,16 @@ object Store {
   }
 
   trait Consuming[S] {
+
+    /**
+      * @return the current state
+      */
     def state: S
+
+    /**
+      * subscribe to changes of S
+      * @param sub a downstream consumer function
+      */
     def subscribe(sub: Downstream[S]): Unit
   }
 
