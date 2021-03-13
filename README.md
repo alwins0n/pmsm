@@ -306,6 +306,16 @@ lensed.reduce(compState => {
 lensed.subscribe(myComponent.update)
 ```
 
+# Error Handling
+
+`Store` offers two APIs for error handling: `addErrorListener` and `addErrorHandler`
+
+Any exceptions occuring in the reduction steps or at downstream consumption
+can be either consumed for e.g. logging (`addErrorListener`)
+or used to update the state in a certain way e.g. alerts (`addErrorHandler`)
+
+The functions dealing with errors are assumed to be fail safe - any exceptions
+will not be handled further.
 
 # Cookbook
 

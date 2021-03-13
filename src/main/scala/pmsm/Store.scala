@@ -200,7 +200,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     *
     * @param listener
     */
-  def installErrorListener(listener: ErrorListener): Unit = {
+  def addErrorListener(listener: ErrorListener): Unit = {
     val asHandler: ErrorHandler = (e, s, m) => {
       listener(e, m)
       s
@@ -211,7 +211,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   /**
     * @param handler
     */
-  def installErrorHandler(handler: ErrorHandler): Unit =
+  def addErrorHandler(handler: ErrorHandler): Unit =
     this.errorHandler = handler :: errorHandler
 }
 

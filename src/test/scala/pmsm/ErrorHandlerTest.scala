@@ -24,13 +24,13 @@ class ErrorHandlerTest extends AnyFunSuite {
         store.dispatch(TestMessage.MessageB)
         value = 2
     }
-    store.installErrorListener((e, m) => {
+    store.addErrorListener((e, m) => {
       hasError = true
       errorCause = m
       error = e
     })
 
-    store.installErrorHandler { (e, s, m ) =>
+    store.addErrorHandler { (e, s, m ) =>
       ("error occured") :: s
     }
 
