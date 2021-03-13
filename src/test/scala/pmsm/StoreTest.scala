@@ -26,8 +26,8 @@ class StoreTest extends AnyFunSuite {
     }
 
     store.select(_.componentState).subscribe(s => componentInput prepend s.value)
-    store.installReducer[GlobalMessage.type] { (s, _) => s.copy(global = "changedOLD") }
-    store.installReducer[GlobalMessage.type] { (s, _) => s.copy(global = "changed") }
+    store.addMessageReducer[GlobalMessage.type] { (s, _) => s.copy(global = "changedOLD") }
+    store.addMessageReducer[GlobalMessage.type] { (s, _) => s.copy(global = "changed") }
     store.listenTo[GlobalMessage.type] { _ => globalSideEffect prepend store.state.global }
 
     assert(componentInput.isEmpty)

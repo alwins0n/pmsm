@@ -240,7 +240,7 @@ object Store {
     def apply[S](s: S): Store[S, M] = new Store(s)
     def reducing[S](s: S)(reducer: (S, M) => S): Store[S, M] = {
       val store = apply(s)
-      store.installReducer[M] { (st, m) => reducer(st, m) }
+      store.addMessageReducer[M] { (st, m) => reducer(st, m) }
       store
     }
   }
@@ -331,15 +331,15 @@ object Store {
       *
       * eg:
       * {{{
-      *   store.installReducer[HandledMessage] { (s, m) =>
-      *      ... // deal with m, guaranteed to be of type M1
+      *   store.addMessageReducer[HandledMessage] { (s, m) =>
+      *      ... // deal with m, guaranteed to be of type HandledMessage
       *   }
       * }}}
       *
       * @param reducer the typed reducing function
       * @tparam M1 the reduced message type
       */
-    def installReducer[M1 <: M: ClassTag](reducer: (S, M1) => S): Unit =
+    def addMessageReducer[M1 <: M: ClassTag](reducer: (S, M1) => S): Unit =
       reduceMessage(reducer.curried)
 
     /**

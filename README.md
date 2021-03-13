@@ -208,10 +208,10 @@ object ComponentMessage {
 
 ```
 
-to install a reducer for a particular message type use `installReducer`
+to install a reducer for a particular message type use `addMessageReducer`
 
 ```scala
-store.installReducer[ChangeName] { (state, message) => // message is guaranteed to be of type "ChangeNamed"
+store.addMessageReducer[ChangeName] { (state, message) => // message is guaranteed to be of type "ChangeNamed"
     state.copy(nameState = message.newName)
     ...
 })
