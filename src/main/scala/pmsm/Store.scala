@@ -359,7 +359,7 @@ object Store {
 
   class SelectedStore[S, M, S1](
       selector: Selector[S, S1],
-      delegate: Store[S, M]
+      val delegate: Store[S, M]
   ) extends Consuming[S1] {
     override def state: S1 =
       selector(delegate.state)
@@ -372,7 +372,7 @@ object Store {
   class LensedStore[S, M, S1](
       selector: Selector[S, S1],
       modifier: Modifier[S, S1],
-      delegate: Store[S, M]
+      override val delegate: Store[S, M]
   ) extends SelectedStore[S, M, S1](selector, delegate)
       with Reducing[S1, M] {
     override def addReducer(reducer: (S1, M) => S1): Unit =
