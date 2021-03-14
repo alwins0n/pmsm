@@ -59,13 +59,13 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     * @param selector function to select a slice of the state
     * @tparam A type of the slice of the state
     */
-  def select[A](selector: StateSelector[A]): SelectedStore[S, M, A] =
-    new SelectedStore[S, M, A](selector, this)
+  def select[A](selector: StateSelector[A]): Store.Selected[S, M, A] =
+    new Store.Selected[S, M, A](selector, this)
 
   def lens[A](
       get: StateSelector[A]
-  )(mod: StateModifier[A]): LensedStore[S, M, A] =
-    new LensedStore(get, mod, this)
+  )(mod: StateModifier[A]): Store.Lensed[S, M, A] =
+    new Store.Lensed(get, mod, this)
 
   def addSubscription(subscription: StateSubscription): Unit =
     this.subscriptions = subscription :: subscriptions
@@ -357,7 +357,7 @@ object Store {
     def addReducer(reducer: (S, M) => S): Unit
   }
 
-  class SelectedStore[S, M, S1](
+  class Selected[S, M, S1](
       selector: Selector[S, S1],
       val delegate: Store[S, M]
   ) extends Consuming[S1] {
@@ -365,15 +365,15 @@ object Store {
       selector(delegate.state)
     override def subscribe(sub: Downstream[S1]): Unit =
       delegate.addSubscription(Subscription(selector, sub))
-    def modifying(mod: Modifier[S, S1]): LensedStore[S, M, S1] =
-      new LensedStore(selector, mod, delegate)
+    def modifying(mod: Modifier[S, S1]): Lensed[S, M, S1] =
+      new Lensed(selector, mod, delegate)
   }
 
-  class LensedStore[S, M, S1](
+  class Lensed[S, M, S1](
       selector: Selector[S, S1],
       modifier: Modifier[S, S1],
       override val delegate: Store[S, M]
-  ) extends SelectedStore[S, M, S1](selector, delegate)
+  ) extends Selected[S, M, S1](selector, delegate)
       with Reducing[S1, M] {
     override def addReducer(reducer: (S1, M) => S1): Unit =
       delegate.addReducer((s, m) => modifier(s, reducer(selector(s), m)))
