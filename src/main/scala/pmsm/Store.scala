@@ -18,7 +18,8 @@ import scala.reflect.ClassTag
 class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     extends Dispatch[M]
     with Reducing[S, M]
-    with Consuming[S] {
+    with Consuming[S]
+    with Listening[M] {
 
   require(
     historySize >= minimumHistorySize,
@@ -29,8 +30,6 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   type StateModifier[A] = Modifier[S, A]
   type StateSubscription = Subscription[S]
 
-  type Listener = M => Unit
-  type Reducer = (S, M) => S
   type ErrorListener = (Throwable, M) => Unit
   type ErrorHandler = (Throwable, S, M) => S
 
@@ -73,57 +72,8 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   override def subscribe(sub: Downstream[S]): Unit =
     addSubscription(Subscription(identity, sub))
 
-  /**
-    * adds a listener for M in the form of M => Unit
-    *
-    * @param listener the (side effecting) listener
-    */
-  def addListener(listener: Listener): Unit =
+  override def addListener(listener: Listener): Unit =
     this.listeners = listener :: this.listeners
-
-  /**
-    * listens to a specified set of messages.
-    *
-    * usage:
-    * {{{
-    *   store.listen {
-    *     case HandledMessage(...) => // perform side effect
-    *     ...
-    *   })
-    * }}}
-    *
-    * a default case is not necessary, unspecified messages are simply not handled
-    *
-    * @param listen partial function of M => Unit
-    */
-  def listen(listen: PartialFunction[M, Unit]): Unit = {
-    val lst: Listener = m => listen.applyOrElse(m, (_: M) => ())
-    addListener(lst)
-  }
-
-  /**
-    * listens to messages of a certain type.
-    *
-    * usage:
-    * {{{
-    *   store.listenTo[HandledMessage] {
-    *     case SubTypeOfHandledMessage(...) => // perform side effect
-    *     ...
-    *   }
-    * }}}
-    *
-    * note as opposed to [[Store.listen]] the case handling is checked for exhaustiveness
-    *
-    * @param listener side effecting function M1 => Unit
-    * @tparam M1 the listened to message type
-    */
-  def listenTo[M1 <: M: ClassTag](listener: M1 => Unit): Unit = {
-    val lst: Listener = {
-      case a: M1 => listener(a)
-      case _     => ()
-    }
-    addListener(lst)
-  }
 
   override def addReducer(reducer: (S, M) => S): Unit =
     this.reducers = reducer :: reducers
@@ -209,7 +159,9 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     * installs a side effecting error listener that is invoked when
     * an error in the message processing occurs.
     *
-    * @param listener
+    * errors within handler functions are not further processed and are rethrown
+    *
+    * @param listener the callback
     */
   def addErrorListener(listener: ErrorListener): Unit = {
     val asHandler: ErrorHandler = (e, s, m) => {
@@ -220,7 +172,12 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   }
 
   /**
-    * @param handler
+    *  installs a state returning error handler that is invoked when
+    * an error in the message processing occurs.
+    *
+    * errors within handler functions are not further processed and are rethrown
+    *
+    * @param handler the callback
     */
   def addErrorHandler(handler: ErrorHandler): Unit =
     this.errorHandler = handler :: errorHandler
@@ -293,7 +250,65 @@ object Store {
     def subscribe(sub: Downstream[S]): Unit
   }
 
+  trait Listening[M] {
+
+    type Listener = M => Unit
+
+    /**
+      * adds a listener for M in the simplest form of M => Unit
+      *
+      * @param listener the (side effecting) listener
+      */
+    def addListener(listener: Listener): Unit
+
+    /**
+      * listens to a specified set of messages.
+      *
+      * usage:
+      * {{{
+      *   store.listen {
+      *     case HandledMessage(...) => // perform side effect
+      *     ...
+      *   })
+      * }}}
+      *
+      * a default case is not necessary, unspecified messages are simply not handled
+      *
+      * @param listen partial function of M => Unit
+      */
+    def listen(listen: PartialFunction[M, Unit]): Unit = {
+      val lst: Listener = m => listen.applyOrElse(m, (_: M) => ())
+      addListener(lst)
+    }
+
+    /**
+      * listens to messages of a certain type.
+      *
+      * usage:
+      * {{{
+      *   store.listenTo[HandledMessage] {
+      *     case SubTypeOfHandledMessage(...) => // perform side effect
+      *     ...
+      *   }
+      * }}}
+      *
+      * note as opposed to [[Store.listen]] the case handling is checked for exhaustiveness
+      *
+      * @param listener side effecting function M1 => Unit
+      * @tparam M1 the listened to message type
+      */
+    def listenTo[M1 <: M: ClassTag](listener: M1 => Unit): Unit = {
+      val lst: Listener = {
+        case a: M1 => listener(a)
+        case _     => ()
+      }
+      addListener(lst)
+    }
+  }
+
   trait Reducing[S, M] {
+
+    type Reducer = (S, M) => S
 
     /**
       * reduces the state by specifying handled messages.
@@ -365,7 +380,7 @@ object Store {
       *
       * @param reducer the typed reducing function
       */
-    def addReducer(reducer: (S, M) => S): Unit
+    def addReducer(reducer: Reducer): Unit
   }
 
   class Selected[S, M, S1](
