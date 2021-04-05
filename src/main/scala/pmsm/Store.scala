@@ -74,6 +74,14 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     addSubscription(Subscription(identity, sub))
 
   /**
+   * adds a listener for M in the form of M => Unit
+   *
+   * @param listener the (side effecting) listener
+   */
+  def addListener(listener: Listener): Unit =
+    this.listeners = listener :: this.listeners
+
+  /**
     * listens to a specified set of messages.
     *
     * usage:
@@ -90,7 +98,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     */
   def listen(listen: PartialFunction[M, Unit]): Unit = {
     val lst: Listener = m => listen.applyOrElse(m, (_: M) => ())
-    this.listeners = lst :: this.listeners
+    addListener(lst)
   }
 
   /**
@@ -114,7 +122,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
       case a: M1 => listener(a)
       case _     => ()
     }
-    this.listeners = lst :: this.listeners
+    addListener(lst)
   }
 
   override def addReducer(reducer: (S, M) => S): Unit =
