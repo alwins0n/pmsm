@@ -340,15 +340,16 @@ val store = Store.accepting[MyMessage].reducing(MyState(...))((s, m) => m match 
 *TODO* describe better
 
 There is no extra magic to support async behaviour.
-Use a `Listener` to catch messages that results in async calls (eg. XHR)
+Use a `Listener` to catch messages that should result in async calls (eg. XHR)
 and feed the result back into the store by dispatching to it in the async callback.
-
-*TODO* example 
 
 ## Connect multiple Stores (Parent - Child)
 
-*TODO* example via listeners and dispatch
+*TODO* better example via listeners and dispatch?
 
-# TODO for Future
-- error channel? catch non reduced? allow reducers to return a defined boundary (Try)?
-- force error handler on listeners?
+```scala
+val parent = Store(Nil) // accepts Any message
+val child = Store.accepting[TestMessage].init(Nil)
+
+child.addListener(parent) // parent is now notified by all child messages
+```
