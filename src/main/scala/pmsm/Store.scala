@@ -74,10 +74,10 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     addSubscription(Subscription(identity, sub))
 
   /**
-   * adds a listener for M in the form of M => Unit
-   *
-   * @param listener the (side effecting) listener
-   */
+    * adds a listener for M in the form of M => Unit
+    *
+    * @param listener the (side effecting) listener
+    */
   def addListener(listener: Listener): Unit =
     this.listeners = listener :: this.listeners
 
@@ -136,6 +136,9 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   /**
     * dispatches a message to the store. causes state to be reduced
     * and listeners as well as subscriptions (select) to be invoked with the reduced state.
+    *
+    * if multiple messages are received by the store within the same digest cycle
+    * they are queued to ensure correct ordering/behaviour
     *
     * @param message any message of acceptable type
     */
