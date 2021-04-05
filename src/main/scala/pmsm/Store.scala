@@ -386,13 +386,15 @@ object Store {
   class Selected[S, M, S1](
       selector: Selector[S, S1],
       val delegate: Store[S, M]
-  ) extends Consuming[S1] {
+  ) extends Consuming[S1] with Listening[M] {
     override def state: S1 =
       selector(delegate.state)
     override def subscribe(sub: Downstream[S1]): Unit =
       delegate.addSubscription(Subscription(selector, sub))
     def modifying(mod: Modifier[S, S1]): Lensed[S, M, S1] =
       new Lensed(selector, mod, delegate)
+    override def addListener(listener: Listener): Unit =
+      delegate.addListener(listener)
   }
 
   class Lensed[S, M, S1](
