@@ -16,13 +16,11 @@ class StoreTest extends AnyFunSuite {
     // setup one component with input and one global variable with side effect
     store
       .select(_.componentState)
-      .subscribe(s => componentInput prepend s.value)
-      .delegate
-      .reduceMessage[TestMessage](s => {
-        case TestMessage.MessageA =>
-          s.copy(componentState = s.componentState.increment())
-        case TestMessage.MessageB =>
-          s.copy(componentState = s.componentState.setTo(7))
+      .subscribe(cs => componentInput prepend cs.value)
+      .modifying((s, cs) => s.copy(componentState = cs))
+      .reduceMessage[TestMessage](cs => {
+        case TestMessage.MessageA => cs.increment()
+        case TestMessage.MessageB => cs.setTo(7)
       })
       .listenTo[TestMessage] {
         case TestMessage.MessageA => ()
@@ -30,14 +28,10 @@ class StoreTest extends AnyFunSuite {
           if (store.state.componentState.value == 7)
             store.dispatch(GlobalMessage)
       }
-      .select(_.global)
-      .modifying((s, g) => s.copy(global = g))
-      .addMessageReducer[GlobalMessage.type] { (_, _) =>
-        "changedOLD"
-      }
-      .addMessageReducer[GlobalMessage.type] { (_, _) =>
-        "changed"
-      }
+      .delegate
+      .lens(_.global)((s, g) => s.copy(global = g))
+      .addMessageReducer[GlobalMessage.type]((_, _) => "changedOLD")
+      .addMessageReducer[GlobalMessage.type]((_, _) => "changed")
       .listenTo[GlobalMessage.type] { _ =>
         globalSideEffect prepend store.state.global
       }
