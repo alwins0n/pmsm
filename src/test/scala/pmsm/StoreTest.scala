@@ -10,25 +10,37 @@ class StoreTest extends AnyFunSuite {
     val globalSideEffect = ListBuffer.empty[String]
     val componentInput = ListBuffer.empty[Int]
 
-    val store = Store(TestState(componentState = SimpleState(0), global = "init"))
+    val store =
+      Store(TestState(componentState = SimpleState(0), global = "init"))
 
     // setup one component with input and one global variable with side effect
-    store.reduceMessage[TestMessage](s => {
-      case TestMessage.MessageA => s.copy(componentState = s.componentState.increment())
-      case TestMessage.MessageB => s.copy(componentState = s.componentState.setTo(7))
-    })
-
-    store.listenTo[TestMessage] {
-      case TestMessage.MessageA => ()
-      case TestMessage.MessageB =>
-        if (store.state.componentState.value == 7)
-          store.dispatch(GlobalMessage)
-    }
-
-    store.select(_.componentState).subscribe(s => componentInput prepend s.value)
-    store.addMessageReducer[GlobalMessage.type] { (s, _) => s.copy(global = "changedOLD") }
-    store.addMessageReducer[GlobalMessage.type] { (s, _) => s.copy(global = "changed") }
-    store.listenTo[GlobalMessage.type] { _ => globalSideEffect prepend store.state.global }
+    store
+      .select(_.componentState)
+      .subscribe(s => componentInput prepend s.value)
+      .delegate
+      .reduceMessage[TestMessage](s => {
+        case TestMessage.MessageA =>
+          s.copy(componentState = s.componentState.increment())
+        case TestMessage.MessageB =>
+          s.copy(componentState = s.componentState.setTo(7))
+      })
+      .listenTo[TestMessage] {
+        case TestMessage.MessageA => ()
+        case TestMessage.MessageB =>
+          if (store.state.componentState.value == 7)
+            store.dispatch(GlobalMessage)
+      }
+      .select(_.global)
+      .modifying((s, g) => s.copy(global = g))
+      .addMessageReducer[GlobalMessage.type] { (_, _) =>
+        "changedOLD"
+      }
+      .addMessageReducer[GlobalMessage.type] { (_, _) =>
+        "changed"
+      }
+      .listenTo[GlobalMessage.type] { _ =>
+        globalSideEffect prepend store.state.global
+      }
 
     assert(componentInput.isEmpty)
 
@@ -64,6 +76,5 @@ class StoreTest extends AnyFunSuite {
   case class TestState(componentState: SimpleState, global: String)
 
   case object GlobalMessage
-
 
 }

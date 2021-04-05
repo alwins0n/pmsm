@@ -16,8 +16,7 @@ import scala.reflect.ClassTag
   * @tparam M type of the messages that should be manageable
   */
 class Store[S, M](init: S, historySize: Int = minimumHistorySize)
-    extends Dispatch[M]
-    with Reducing[S, M]
+    extends Reducing[S, M]
     with Consuming[S]
     with Listening[M] {
 
@@ -66,22 +65,30 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   )(mod: StateModifier[A]): Store.Lensed[S, M, A] =
     new Store.Lensed(get, mod, this)
 
-  def addSubscription(subscription: StateSubscription): Unit =
+  def addSubscription(subscription: StateSubscription): this.type = {
     this.subscriptions = subscription :: subscriptions
+    this
+  }
 
-  override def subscribe(sub: Downstream[S]): Unit =
+  override def subscribe(sub: Downstream[S]): this.type = {
     addSubscription(Subscription(identity, sub))
+    this
+  }
 
-  override def addListener(listener: Listener): Unit =
+  override def addListener(listener: Listener): this.type = {
     this.listeners = listener :: this.listeners
+    this
+  }
 
-  override def addReducer(reducer: (S, M) => S): Unit =
+  override def addReducer(reducer: (S, M) => S): this.type = {
     this.reducers = reducer :: reducers
+    this
+  }
 
   /**
     * @see [[dispatch]]
     */
-  override def apply(m: M): Unit = dispatch(m)
+  def apply(m: M): this.type = dispatch(m)
 
   /**
     * dispatches a message to the store. causes state to be reduced
@@ -92,7 +99,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     *
     * @param message any message of acceptable type
     */
-  def dispatch(message: M): Unit = {
+  def dispatch(message: M): this.type = {
     if (processing) {
       messageQueue.enqueue(message)
     } else {
@@ -105,6 +112,7 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
         processing = false
       }
     }
+    this
   }
 
   @tailrec
@@ -150,10 +158,12 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
   /**
     * invokes all subscriptions with the current state
     */
-  def push(): Unit =
+  def push(): this.type = {
     subscriptions.foreach { s =>
       (s.select _).andThen(s.use).apply(currentState)
     }
+    this
+  }
 
   /**
     * installs a side effecting error listener that is invoked when
@@ -163,12 +173,13 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     *
     * @param listener the callback
     */
-  def addErrorListener(listener: ErrorListener): Unit = {
+  def addErrorListener(listener: ErrorListener): this.type = {
     val asHandler: ErrorHandler = (e, s, m) => {
       listener(e, m)
       s
     }
     this.errorHandler = asHandler :: errorHandler
+    this
   }
 
   /**
@@ -179,8 +190,10 @@ class Store[S, M](init: S, historySize: Int = minimumHistorySize)
     *
     * @param handler the callback
     */
-  def addErrorHandler(handler: ErrorHandler): Unit =
+  def addErrorHandler(handler: ErrorHandler): this.type = {
     this.errorHandler = handler :: errorHandler
+    this
+  }
 }
 
 object Store {
@@ -213,7 +226,6 @@ object Store {
     }
   }
 
-  type Dispatch[M] = M => Unit
   type Downstream[T] = T => Unit
 
   type Selector[S, S1] = S => S1
@@ -247,7 +259,7 @@ object Store {
       * subscribe to changes of S
       * @param sub a downstream consumer function
       */
-    def subscribe(sub: Downstream[S]): Unit
+    def subscribe(sub: Downstream[S]): this.type
   }
 
   trait Listening[M] {
@@ -259,7 +271,7 @@ object Store {
       *
       * @param listener the (side effecting) listener
       */
-    def addListener(listener: Listener): Unit
+    def addListener(listener: Listener): this.type
 
     /**
       * listens to a specified set of messages.
@@ -276,7 +288,7 @@ object Store {
       *
       * @param listen partial function of M => Unit
       */
-    def listen(listen: PartialFunction[M, Unit]): Unit = {
+    def listen(listen: PartialFunction[M, Unit]): this.type = {
       val lst: Listener = m => listen.applyOrElse(m, (_: M) => ())
       addListener(lst)
     }
@@ -297,7 +309,7 @@ object Store {
       * @param listener side effecting function M1 => Unit
       * @tparam M1 the listened to message type
       */
-    def listenTo[M1 <: M: ClassTag](listener: M1 => Unit): Unit = {
+    def listenTo[M1 <: M: ClassTag](listener: M1 => Unit): this.type = {
       val lst: Listener = {
         case a: M1 => listener(a)
         case _     => ()
@@ -325,7 +337,7 @@ object Store {
       *
       * @param reducer a "partial" version of S => M => S
       */
-    def reduce(reducer: S => PartialFunction[M, S]): Unit =
+    def reduce(reducer: S => PartialFunction[M, S]): this.type =
       addReducer((s, m) => reducer(s).lift(m).getOrElse(s))
 
     /**
@@ -344,7 +356,7 @@ object Store {
       * @param reducer reducing function (S, M) => S in the curried form of S => M1 => S
       * @tparam M1 the reduced message type
       */
-    def reduceMessage[M1 <: M: ClassTag](reducer: S => M1 => S): Unit =
+    def reduceMessage[M1 <: M: ClassTag](reducer: S => M1 => S): this.type =
       addReducer((s, m) =>
         m match {
           case a: M1 => reducer(s)(a)
@@ -365,7 +377,7 @@ object Store {
       * @param reducer the typed reducing function
       * @tparam M1 the reduced message type
       */
-    def addMessageReducer[M1 <: M: ClassTag](reducer: (S, M1) => S): Unit =
+    def addMessageReducer[M1 <: M: ClassTag](reducer: (S, M1) => S): this.type =
       reduceMessage(reducer.curried)
 
     /**
@@ -380,21 +392,28 @@ object Store {
       *
       * @param reducer the typed reducing function
       */
-    def addReducer(reducer: Reducer): Unit
+    def addReducer(reducer: Reducer): this.type
   }
 
   class Selected[S, M, S1](
       selector: Selector[S, S1],
       val delegate: Store[S, M]
-  ) extends Consuming[S1] with Listening[M] {
-    override def state: S1 =
-      selector(delegate.state)
-    override def subscribe(sub: Downstream[S1]): Unit =
+  ) extends Consuming[S1]
+      with Listening[M] {
+    override def state: S1 = selector(delegate.state)
+
+    override def subscribe(sub: Downstream[S1]): this.type = {
       delegate.addSubscription(Subscription(selector, sub))
+      this
+    }
+
+    override def addListener(listener: Listener): this.type = {
+      delegate.addListener(listener)
+      this
+    }
+
     def modifying(mod: Modifier[S, S1]): Lensed[S, M, S1] =
       new Lensed(selector, mod, delegate)
-    override def addListener(listener: Listener): Unit =
-      delegate.addListener(listener)
   }
 
   class Lensed[S, M, S1](
@@ -403,7 +422,10 @@ object Store {
       override val delegate: Store[S, M]
   ) extends Selected[S, M, S1](selector, delegate)
       with Reducing[S1, M] {
-    override def addReducer(reducer: (S1, M) => S1): Unit =
+    override def addReducer(reducer: (S1, M) => S1): this.type = {
       delegate.addReducer((s, m) => modifier(s, reducer(selector(s), m)))
+      this
+    }
+
   }
 }
