@@ -317,6 +317,66 @@ or used to update the state in a certain way e.g. alerts (`addErrorHandler`)
 The functions dealing with errors are assumed to be fail safe - any exceptions
 will not be handled further.
 
+# Full Example with Fluent API
+
+```scala    
+// dummy "components" to test output
+val counterComponentBuffer = ListBuffer.empty[Int]
+val alertBuffer = ListBuffer.empty[String]
+
+// "complex" message
+sealed trait CounterMessage
+object CounterMessage {
+  case object Increment extends CounterMessage
+  case object SetToDefaultValue extends CounterMessage
+}
+
+case object CheckCounter
+
+// event not dispatched by components but by external sources
+case object SevenWasConfirmedEvent
+
+// the test state
+case class AppState(component: CounterState, alertMessage: String)
+case class CounterState(value: Int) {
+  def increment(): CounterState = copy(value = value + 1)
+  def setTo(int: Int): CounterState = CounterState(int)
+}
+
+// kick off
+val init = AppState(component = CounterState(0), alertMessage = "")
+val store = Store(init)
+store
+  .addListener(msg => println(s"DEBUG: msg received: $msg"))
+  .addErrorHandler { (ex, state, msg) =>
+    println(s"ERROR: error ${ex.getMessage} when handling $msg")
+    state.copy(alertMessage = "An error occured")
+  }
+  .select(_.component) // focus into counter component
+  .subscribe(updatedCounterState =>
+    counterComponentBuffer prepend updatedCounterState.value
+  )
+  .modifying((state, counterState) => state.copy(component = counterState))
+  .reduceMessage[CounterMessage](counterState => {
+    case CounterMessage.Increment         => counterState.increment()
+    case CounterMessage.SetToDefaultValue => counterState.setTo(7)
+  })
+  .listen {
+    case CheckCounter =>
+      if (store.state.component.value == 7) {
+        // async call after which on success:
+        store.dispatch(SevenWasConfirmedEvent)
+      }
+  }
+  .delegate // back to root store
+  .lens(_.alertMessage)((state, alert) => state.copy(alertMessage = alert))
+  .subscribe(newMsg => alertBuffer prepend newMsg)
+  .addMessageReducer[SevenWasConfirmedEvent.type]((_, _) => "The 7 was confirmed")
+
+// init all components by pushing the state manually
+store.push()
+```
+
 # Cookbook
 
 ## Usage for HTML output
